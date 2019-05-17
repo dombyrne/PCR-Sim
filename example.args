@@ -1,0 +1,5 @@
+genomes_file_path="/home/p946572/python/chinese_swine_surveillance/3prim_pcr_sim/test.fa"
+pcr_conditions_file_path="/home/p946572/python/chinese_swine_surveillance/pcr_conditions_pdmhu.csv"
+output_file="/home/p946572/python/chinese_swine_surveillance/3prim_pcr_sim/3prim_test.csv"
+max_amp_size=500
+cores=14
