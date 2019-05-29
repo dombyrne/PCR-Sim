@@ -321,4 +321,4 @@ for pcr in conditions.index:
 	print "%s predicted negatives: %d" % (pcr, len(negatives[pcr]))
 
 results.to_csv(output_file)
-#os.system("rm -r %s" % temp_dir)
+os.system("rm -r %s" % temp_dir)
