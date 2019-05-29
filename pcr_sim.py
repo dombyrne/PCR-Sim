@@ -9,11 +9,9 @@ complementarity between given influenza genome sequences and RT-qPCRs.
 System calls to UNAFOLD are used to predict the free energy of hybridisation
 between a given primer/probe sequence and the target. These values
 are normalised to the binding energy associated with a perfect match for 
-each primer/probe sequence. The mismatches in the 3 nucleotides at the
-3' (primers) and 5' (probe) end are weighted more heavily. These binding
-index values are compared to thresholds (set by analysing the binding
-of RT-qPCR reactions with experimentally-determined results) to predict the
-outcome of each RT-qPCR.
+each primer/probe sequence. These binding index values are compared to thresholds
+(set by analysing the binding of RT-qPCR reactions with 
+experimentally-determined results) to predict the outcome of each RT-qPCR.
 
 The main output is a .csv file with the predicted results (P or N) for each
 RT-qPCR - virus combination. The actual binding index values are saved
@@ -84,7 +82,7 @@ def parse_genomes_file(genomes_file, cond_frame):
 	for rec in seq_records.keys():
 		seg_name = rec.split("|")[1].strip()
 		seg_id = "Seg" + seg_name
-		strain = rec.split()[0].replace("/", "_").replace(" ", "_")
+		strain = rec.split("|")[0].strip().replace("/", "_").replace(" ", "_")
 		seq = seq_records[rec].strip().replace("\r", "")
 		
 		if seg_name in segments_wanted:
@@ -175,11 +173,12 @@ def disambiguate_amplicons(gen_frame, cond_frame, file_dict, temp_dir_path):
 		alignments = [align_seqs(gene_file, pcr_file)
 					  for pcr_file in pcr_files]
 		binding_sites = [get_binding_site(aln) for aln in alignments]
-		start = min(binding_sites)[0] - 1
-		end = max(binding_sites)[1] - 1
+		start = min(binding_sites)[0]
+		end = max(binding_sites)[1]
 		gene = gen_frame.loc[strain, seg]
-		amplicon = gene[start : end + 1]
+		amplicon = gene[start : end + 1]	
 		amp_id = "_".join([strain, seg])
+		
 		if len(amplicon) <= max_amp_size:
 			dis_amps = disambiguate(amplicon.replace("N", "-"))
 			amp_dict[pcr].update({amp_id : dis_amps})
@@ -187,7 +186,7 @@ def disambiguate_amplicons(gen_frame, cond_frame, file_dict, temp_dir_path):
 	return amp_dict
 
 
-def assess_pcr_binding(amp_dict, cond_frame, temp_dir_path, n_cores, tp_coeff, empty_out_frame):
+def assess_pcr_binding(amp_dict, cond_frame, temp_dir_path, n_cores, empty_out_frame):
 	
 	pcrs = amp_dict.keys()
 	pcr_comps = ["Fwd primer seq", "Probe seq", "Rev primer seq"]
@@ -206,20 +205,19 @@ def assess_pcr_binding(amp_dict, cond_frame, temp_dir_path, n_cores, tp_coeff, e
 			len_comp_seq = len(comp_seq)
 			
 			dis_comp_seqs = disambiguate(comp_seq)
-			trunc_dis_comp_seqs = [seq[3:] if comp_id == "pro" else seq[:-3] for seq in dis_comp_seqs]
 			r_dis_comp_seqs = [rev_comp(seq) for seq in dis_comp_seqs]
-			r_trunc_dis_comp_seqs = [rev_comp(seq) for seq in trunc_dis_comp_seqs]
 			
-			pcr_seqs = zip(dis_comp_seqs, r_dis_comp_seqs, trunc_dis_comp_seqs, r_trunc_dis_comp_seqs)
+			pcr_seqs = zip(dis_comp_seqs, r_dis_comp_seqs)
+			arg_tups = [(temp_dir_path, pcr, melt_args, comp_id, pcr_seqs, amp_dict, amp_id, empty_out_frame)
+					for amp_id in amp_dict[pcr].keys()]
 			
-			arg_tups = [(temp_dir_path, pcr, melt_args, comp_id, pcr_seqs, len_comp_seq, amp_dict, amp_id, tp_coeff, empty_out_frame)
-						for amp_id in amp_dict[pcr].keys()]
 			
 			os.chdir(temp_dir_path)
 			pool = ThreadPool(cores)
 			pool.map(get_dg_vals, arg_tups)
 			os.chdir("..")
-				
+			
+			
 	return empty_out_frame
 
 
@@ -230,37 +228,28 @@ def get_dg_vals(args):
 	melt_args = args[2]
 	comp_id = args[3]
 	pcr_seqs = args[4]
-	len_comp_seq = args[5]
-	amp_dict = args[6]
-	amp_id = args[7]
-	tp_coeff = args[8]
-	empty_out_frame = args[9]
+	amp_dict = args[5]
+	amp_id = args[6]
+	empty_out_frame = args[7]
 	
 	fname_stem = temp_dir_path + "/" + "_".join([pcr, comp_id, amp_id])
 	comp_fname = fname_stem + "_1.fa"
 	amp_fname = fname_stem + "_2.fa"
 	r_comp_fname = fname_stem + "_3.fa"
-	trunc_fname = fname_stem + "4.fa"
-	r_trunc_fname = fname_stem + "5.fa"
+
 	
 	with open(comp_fname, "w") as comp_fh, \
 		 open(amp_fname, "w") as amp_fh, \
-		 open(r_comp_fname, "w") as r_comp_fh, \
-		 open(trunc_fname, "w") as trunc_fh, \
-		 open(r_trunc_fname, "w") as r_trunc_fh:				
+		 open(r_comp_fname, "w") as r_comp_fh:
 		
 		for amp_i, amp_seq in enumerate(amp_dict[pcr][amp_id]):
 			amp_header = ">" + "_".join([amp_id, str(amp_i + 1)])
 			for comp_i, seqs in enumerate(pcr_seqs):
 				comp_seq = seqs[0]
 				r_comp_seq = seqs[1]
-				trunc_seq = seqs[2]
-				r_trunc_seq = seqs[3]
 				
 				comp_header = ">" + "_".join([pcr, comp_id, str(comp_i + 1)])
 				r_comp_header = comp_header + "_rev_comp"
-				trunc_header = comp_header + "_trunc"
-				r_trunc_header = comp_header + "_rev_trunc"
 				
 				amp_fh.write(amp_header + "\n")
 				amp_fh.write(amp_seq + "\n")
@@ -271,40 +260,25 @@ def get_dg_vals(args):
 				r_comp_fh.write(r_comp_header + "\n")
 				r_comp_fh.write(r_comp_seq + "\n")
 				
-				trunc_fh.write(trunc_header + "\n")
-				trunc_fh.write(trunc_seq + "\n")
-				
-				r_trunc_fh.write(r_trunc_header + "\n")
-				r_trunc_fh.write(r_trunc_seq + "\n")
 	
 	file1 = comp_fname.split("/")[-1]
 	file2 = amp_fname.split("/")[-1]
 	file3 = r_comp_fname.split("/")[-1]
-	file4 = trunc_fname.split("/")[-1]
-	file5 = r_trunc_fname.split("/")[-1]
 	
 	target_out = subprocess.check_output(" ".join(["melt.pl", melt_args, file1, file2]), shell=True).split("\n")
 	max_out = subprocess.check_output(" ".join(["melt.pl", melt_args, file1, file3]), shell=True).split("\n")
-	trunc_target_out = subprocess.check_output(" ".join(["melt.pl", melt_args, file4, file2]), shell=True).split("\n")
-	max_trunc_out = subprocess.check_output(" ".join(["melt.pl", melt_args, file4, file3]), shell=True).split("\n")
 	
 	dG_vals = [float(val) for val in [line.split("\t")[0].strip() for line in target_out if "\t" in line][1:]]
 	max_dG_vals = [float(val) for val in [line.split("\t")[0].strip() for line in max_out if "\t" in line][1:]]
-	trunc_dG_vals = [float(val) for val in [line.split("\t")[0].strip() for line in trunc_target_out if "\t" in line][1:]]
-	max_trunc_dG_vals = [float(val) for val in [line.split("\t")[0].strip() for line in max_trunc_out if "\t" in line][1:]]
 	
-	dG_target_norm = [vals[0]/vals[1] for vals in zip(dG_vals, max_dG_vals)]
-	dG_three_prim_norm = [(vals[0] - vals[2])/(vals[1] - vals[3]) for vals in
-						  zip(dG_vals, max_dG_vals, trunc_dG_vals, max_trunc_dG_vals)]
-	dG_final = [round(vals[0] + (vals[1] * 3/len_comp_seq * (tp_coeff - 1)), 3) for vals in
-				zip(dG_target_norm, dG_three_prim_norm)]
+	dG_final = [round(vals[0]/vals[1], 3) for vals in zip(dG_vals, max_dG_vals)]
 	
 	strain = "_".join(amp_id.split("_")[:-1])
 	pcr_comp = pcr + "_" + comp_id
-	empty_out_frame.loc[strain, pcr_comp] = max(dG_final)
-				
+	empty_out_frame.loc[strain, pcr_comp] = max(dG_final)			
 
-three_prim_coeff = 3
+
+
 conditions = get_conditions(pcr_conditions_file_path)
 genomes = parse_genomes_file(genomes_file_path, conditions)
 correct_primpro_orientation(conditions)
@@ -318,7 +292,8 @@ amplicons =  disambiguate_amplicons(genomes, conditions, seq_files, temp_dir)
 comps = ["fwd", "rev", "pro"]
 cols = [pcr + "_" + comp for pcr in conditions.index for comp in comps]
 empty_frame = pd.DataFrame(index = genomes.index, columns = cols)
-dg_vals = assess_pcr_binding(amplicons, conditions, temp_dir, cores, three_prim_coeff, empty_frame)
+
+dg_vals = assess_pcr_binding(amplicons, conditions, temp_dir, cores, empty_frame).fillna(0)
 dg_vals.to_csv(temp_dir + "/dg_vals.csv")
 
 results = pd.DataFrame(index = genomes.index, columns = conditions.index)
@@ -334,7 +309,7 @@ for strain in dg_vals.index:
 		
 		prim = np.mean([fwd_val, rev_val])
 		
-		if prim >= 0.7 and pro_val >= 0.78:
+		if prim >= 0.7 and pro_val >= 0.7:
 			results.loc[strain, pcr] = "P"
 			positives[pcr].append(strain)
 		else:
@@ -346,4 +321,4 @@ for pcr in conditions.index:
 	print "%s predicted negatives: %d" % (pcr, len(negatives[pcr]))
 
 results.to_csv(output_file)
-os.system("rm -r %s" % temp_dir)
+#os.system("rm -r %s" % temp_dir)
