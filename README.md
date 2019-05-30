@@ -21,4 +21,4 @@ DEPENDENCIES:
  - pandas v0.24.1
  - numpy v1.15.4
  - BioPython v1.72
- - UNAFOLD
+ - OligoArrayAux (UNAFOLD)
